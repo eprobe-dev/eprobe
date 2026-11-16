@@ -24,12 +24,12 @@
 
 ---
 
-<p align="center">
-  <img src="img/eprobe-cli_img1.png" alt="eprobe interactive terminal TUI" width="850" />
-</p>
+| **Mutex & Futex Lock Contention (`perf/stall-tracer`)** | **Zero-Cert Plaintext HTTPS Inspection (`app/universal-tls-sniffer`)** |
+| :---: | :---: |
+| <img src="img/perf-stall-tracer.jpg" alt="eprobe perf/stall-tracer Mutex and Futex Lock Contention TUI" width="100%" /> | <img src="img/universal-tls-sniffer.jpg" alt="eprobe app/universal-tls-sniffer Live Decrypted TLS Traffic TUI" width="100%" /> |
 
 <p align="center">
-  <em>Live interactive Bubbletea TUI displaying real-time container CPU %, memory RSS, network throughput, disk I/O, and block I/O stream with runtime container name resolution.</em>
+  <em>Interactive multi-page Bubbletea TUI running live on Linux 7.0: isolating microsecond futex lock contention victims &amp; latency histograms (left) and OpenSSL uprobe-decrypted HTTPS API endpoints &amp; traffic streams without TLS proxy certificates (right).</em>
 </p>
 
 ---
