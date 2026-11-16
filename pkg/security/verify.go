@@ -6,16 +6,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 )
 
-// DefaultPublicKeyHex is the default hex-encoded Ed25519 public key used for module verification
-const DefaultPublicKeyHex = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+// DefaultPublicKeyHex is the default hex-encoded Ed25519 public key used for module verification.
+const DefaultPublicKeyHex = "1bcdbd9a73785923a9521b62e68ad1c3b040f8c24545b844ae9474c678031d7b"
 
-// GetDefaultPublicKey returns the default Ed25519 public key bytes
+// GetDefaultPublicKey returns the default Ed25519 public key bytes.
+// If EPROBE_PUBLIC_KEY is set to a valid 32-byte hex-encoded key, it overrides DefaultPublicKeyHex.
 func GetDefaultPublicKey() ed25519.PublicKey {
+	if envHex := strings.TrimSpace(os.Getenv("EPROBE_PUBLIC_KEY")); envHex != "" {
+		if envBytes, err := hex.DecodeString(envHex); err == nil && len(envBytes) == ed25519.PublicKeySize {
+			return ed25519.PublicKey(envBytes)
+		}
+	}
 	keyBytes, _ := hex.DecodeString(DefaultPublicKeyHex)
-	return keyBytes
+	return ed25519.PublicKey(keyBytes)
 }
 
 // VerifyManifest verifies that the manifest bytes match the provided signature using the public key.

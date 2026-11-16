@@ -76,8 +76,6 @@ func resolveCandidateProcesses(manifest *registry.Manifest) []string {
 		return []string{"mysqld", "mariadbd"}
 	case strings.Contains(modName, "docker"):
 		return []string{"dockerd", "containerd"}
-	case strings.Contains(modName, "zabbix"):
-		return []string{"zabbix_server", "zabbix_agentd", "zabbix_agent2"}
 	case strings.Contains(modName, "http"):
 		return []string{"nginx", "httpd", "apache2", "caddy", "node"}
 	case strings.Contains(modName, "postgres") || strings.Contains(modName, "pgsql"):

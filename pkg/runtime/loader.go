@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cilium/ebpf"
@@ -21,6 +23,7 @@ type ModuleOptions struct {
 	SlowThresholdUS uint64
 	CustomLibSSL    string
 	FilterErrors    bool
+	DynamicVars     map[string]string
 }
 
 // resolveLibSSLPath locates an active libssl.so on the system or validates the custom path.
@@ -71,13 +74,215 @@ func (lm *LoadedModule) Close() {
 	}
 }
 
-// LoadModule loads the eBPF ELF binary, performs relocations, and attaches to hooks dynamically using cache manifests
+func normalizeFlagKey(s string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "_", "-")
+}
+
+// ValidateDynamicFlags ensures every dynamic CLI flag supplied by the operator maps to a
+// declared variable in manifest.Variables.
+func ValidateDynamicFlags(manifest *registry.Manifest, dynamicVars map[string]string) error {
+	if len(dynamicVars) == 0 || manifest == nil {
+		if len(dynamicVars) > 0 {
+			for k := range dynamicVars {
+				return fmt.Errorf("unknown flag --%s (module declares no dynamic variables)", k)
+			}
+		}
+		return nil
+	}
+
+	allowed := make(map[string]bool, len(manifest.Variables))
+	for _, vInfo := range manifest.Variables {
+		key := normalizeFlagKey(vInfo.CLIFlag)
+		if key == "" {
+			key = normalizeFlagKey(vInfo.Name)
+		}
+		if key != "" {
+			allowed[key] = true
+		}
+	}
+
+	keys := make([]string, 0, len(dynamicVars))
+	for k := range dynamicVars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		if !allowed[normalizeFlagKey(k)] {
+			return fmt.Errorf("unknown flag --%s for module %s (run 'eprobe help %s' for supported flags)", k, manifest.Name, manifest.Name)
+		}
+	}
+	return nil
+}
+
+func parseVariableValue(raw string, varType string) (interface{}, error) {
+	trimmed := strings.TrimSpace(raw)
+	normType := strings.ToLower(strings.TrimSpace(varType))
+
+	// Allow boolean-style flag values ("true"/"false") for numeric flags like errors_only
+	if strings.HasPrefix(normType, "uint") || strings.HasPrefix(normType, "int") {
+		if strings.EqualFold(trimmed, "true") {
+			trimmed = "1"
+		} else if strings.EqualFold(trimmed, "false") {
+			trimmed = "0"
+		}
+	}
+
+	switch normType {
+	case "uint8":
+		v, err := strconv.ParseUint(trimmed, 10, 8)
+		if err != nil {
+			return nil, err
+		}
+		return uint8(v), nil
+	case "uint16":
+		v, err := strconv.ParseUint(trimmed, 10, 16)
+		if err != nil {
+			return nil, err
+		}
+		return uint16(v), nil
+	case "uint32":
+		v, err := strconv.ParseUint(trimmed, 10, 32)
+		if err != nil {
+			return nil, err
+		}
+		return uint32(v), nil
+	case "uint64":
+		v, err := strconv.ParseUint(trimmed, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return uint64(v), nil
+	case "int32":
+		v, err := strconv.ParseInt(trimmed, 10, 32)
+		if err != nil {
+			return nil, err
+		}
+		return int32(v), nil
+	case "int64":
+		v, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return int64(v), nil
+	case "bool":
+		v, err := strconv.ParseBool(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		return v, nil
+	default:
+		return nil, fmt.Errorf("unsupported variable type %q", varType)
+	}
+}
+
+func castUintValue(val uint64, varType string) (interface{}, error) {
+	switch strings.ToLower(strings.TrimSpace(varType)) {
+	case "uint8":
+		return uint8(val), nil
+	case "uint16":
+		return uint16(val), nil
+	case "uint32":
+		return uint32(val), nil
+	case "uint64":
+		return uint64(val), nil
+	case "int32":
+		return int32(val), nil
+	case "int64":
+		return int64(val), nil
+	case "bool":
+		return val != 0, nil
+	default:
+		return nil, fmt.Errorf("unsupported variable type %q", varType)
+	}
+}
+
+// ValidateAndBindVariables validates dynamic CLI flags against manifest.Variables and
+// rewrites matching eBPF .rodata constants in spec.Variables.
+func ValidateAndBindVariables(spec *ebpf.CollectionSpec, manifest *registry.Manifest, opts ModuleOptions) error {
+	if err := ValidateDynamicFlags(manifest, opts.DynamicVars); err != nil {
+		return err
+	}
+	if manifest == nil || spec == nil {
+		return nil
+	}
+
+	normDyn := make(map[string]string, len(opts.DynamicVars))
+	for k, v := range opts.DynamicVars {
+		normDyn[normalizeFlagKey(k)] = v
+	}
+
+	for _, vInfo := range manifest.Variables {
+		flagKey := normalizeFlagKey(vInfo.CLIFlag)
+		if flagKey == "" {
+			flagKey = normalizeFlagKey(vInfo.Name)
+		}
+
+		var boundVal interface{}
+		var shouldSet bool
+
+		switch {
+		case flagKey == "port" && opts.FilterPort != 0:
+			var err error
+			boundVal, err = castUintValue(uint64(opts.FilterPort), vInfo.Type)
+			if err != nil {
+				return fmt.Errorf("invalid type for variable %s: %w", vInfo.Name, err)
+			}
+			shouldSet = true
+		case flagKey == "pid" && opts.FilterPID != 0:
+			var err error
+			boundVal, err = castUintValue(uint64(opts.FilterPID), vInfo.Type)
+			if err != nil {
+				return fmt.Errorf("invalid type for variable %s: %w", vInfo.Name, err)
+			}
+			shouldSet = true
+		case (flagKey == "slow-us" || flagKey == "slow") && opts.SlowThresholdUS != 0:
+			var err error
+			boundVal, err = castUintValue(opts.SlowThresholdUS, vInfo.Type)
+			if err != nil {
+				return fmt.Errorf("invalid type for variable %s: %w", vInfo.Name, err)
+			}
+			shouldSet = true
+		case flagKey == "errors-only" && opts.FilterErrors:
+			var err error
+			boundVal, err = castUintValue(1, vInfo.Type)
+			if err != nil {
+				return fmt.Errorf("invalid type for variable %s: %w", vInfo.Name, err)
+			}
+			shouldSet = true
+		default:
+			if rawVal, ok := normDyn[flagKey]; ok {
+				var err error
+				boundVal, err = parseVariableValue(rawVal, vInfo.Type)
+				if err != nil {
+					return fmt.Errorf("invalid value %q for --%s (%s): %w", rawVal, flagKey, vInfo.Type, err)
+				}
+				shouldSet = true
+			}
+		}
+
+		if shouldSet {
+			if v, ok := spec.Variables[vInfo.Name]; ok {
+				if err := v.Set(boundVal); err != nil {
+					return fmt.Errorf("failed to set variable %s: %w", vInfo.Name, err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// LoadModule loads the eBPF ELF binary, performs relocations, and attaches to hooks dynamically using cache manifests.
 func LoadModule(name string, opts ModuleOptions) (*LoadedModule, error) {
+	return LoadModuleFromDir(registry.GetModulePath(name), opts)
+}
+
+// LoadModuleFromDir loads the eBPF ELF binary and manifest directly from modDir.
+func LoadModuleFromDir(modDir string, opts ModuleOptions) (*LoadedModule, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		fmt.Printf("Warning: failed to remove memlock: %v\n", err)
 	}
-
-	modDir := registry.GetModulePath(name)
 
 	// 1. Read manifest.yaml dynamically
 	manifestPath := filepath.Join(modDir, "manifest.yaml")
@@ -108,33 +313,9 @@ func LoadModule(name string, opts ModuleOptions) (*LoadedModule, error) {
 		return nil, fmt.Errorf("failed to load collection spec: %w", err)
 	}
 
-	// 5. Rewrite variables dynamically if options are supplied
-	for _, vInfo := range manifest.Variables {
-		if vInfo.CLIFlag == "port" && opts.FilterPort != 0 {
-			if v, ok := spec.Variables[vInfo.Name]; ok {
-				if err := v.Set(opts.FilterPort); err != nil {
-					return nil, fmt.Errorf("failed to set variable %s: %w", vInfo.Name, err)
-				}
-			}
-		} else if vInfo.CLIFlag == "pid" && opts.FilterPID != 0 {
-			if v, ok := spec.Variables[vInfo.Name]; ok {
-				if err := v.Set(opts.FilterPID); err != nil {
-					return nil, fmt.Errorf("failed to set variable %s: %w", vInfo.Name, err)
-				}
-			}
-		} else if (vInfo.CLIFlag == "slow-us" || vInfo.CLIFlag == "slow_us" || vInfo.CLIFlag == "slow") && opts.SlowThresholdUS != 0 {
-			if v, ok := spec.Variables[vInfo.Name]; ok {
-				if err := v.Set(opts.SlowThresholdUS); err != nil {
-					return nil, fmt.Errorf("failed to set variable %s: %w", vInfo.Name, err)
-				}
-			}
-		} else if (vInfo.CLIFlag == "errors-only" || vInfo.CLIFlag == "errors_only") && opts.FilterErrors {
-			if v, ok := spec.Variables[vInfo.Name]; ok {
-				if err := v.Set(uint8(1)); err != nil {
-					return nil, fmt.Errorf("failed to set variable %s: %w", vInfo.Name, err)
-				}
-			}
-		}
+	// 5. Validate and bind dynamic variables into .rodata
+	if err := ValidateAndBindVariables(spec, manifest, opts); err != nil {
+		return nil, err
 	}
 
 	// 6. Load collection into kernel (performs automatic CO-RE relocations against host BTF)

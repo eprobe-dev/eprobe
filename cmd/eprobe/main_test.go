@@ -153,3 +153,51 @@ func TestParseArgsCommandAliases(t *testing.T) {
 		t.Errorf("expected module 'sec/exec-audit', got %q", opts.Module)
 	}
 }
+
+func TestParseArgsDynamicModuleFlagsAndModuleFile(t *testing.T) {
+	os.Args = []string{
+		"eprobe", "run",
+		"--module-file", "./dist/perf-stall-tracer.epm",
+		"--stall-type", "1",
+		"--threshold-ms", "50",
+		"--filter-kthreads=0",
+	}
+	opts, err := parseArgs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.Cmd != "run" {
+		t.Fatalf("expected cmd 'run', got %q", opts.Cmd)
+	}
+	if opts.ModuleFile != "./dist/perf-stall-tracer.epm" {
+		t.Errorf("expected module-file './dist/perf-stall-tracer.epm', got %q", opts.ModuleFile)
+	}
+	if opts.DynamicVars["stall-type"] != "1" {
+		t.Errorf("expected stall-type='1', got %q", opts.DynamicVars["stall-type"])
+	}
+	if opts.DynamicVars["threshold-ms"] != "50" {
+		t.Errorf("expected threshold-ms='50', got %q", opts.DynamicVars["threshold-ms"])
+	}
+	if opts.DynamicVars["filter-kthreads"] != "0" {
+		t.Errorf("expected filter-kthreads='0', got %q", opts.DynamicVars["filter-kthreads"])
+	}
+
+	// Dynamic flag before positional module name should not swallow the module name
+	os.Args = []string{"eprobe", "run", "--stall-type", "1", "perf/stall-tracer"}
+	opts, err = parseArgs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.Module != "perf/stall-tracer" {
+		t.Errorf("expected module 'perf/stall-tracer', got %q", opts.Module)
+	}
+	if opts.DynamicVars["stall-type"] != "1" {
+		t.Errorf("expected stall-type='1', got %q", opts.DynamicVars["stall-type"])
+	}
+
+	// Unknown flag on non-run subcommand must still be rejected
+	os.Args = []string{"eprobe", "search", "--bogus-flag"}
+	if _, err := parseArgs(); err == nil {
+		t.Error("expected unknown flag error on non-run subcommand")
+	}
+}

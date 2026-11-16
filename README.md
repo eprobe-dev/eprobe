@@ -2,10 +2,10 @@
 
 <p align="center">
   <a href="https://eprobe.io/"><img src="https://img.shields.io/badge/Website-eprobe.io-00D26A?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website" /></a>
-  <a href="https://github.com/dimitribellini/eprobe-cli/releases/latest"><img src="https://img.shields.io/github/v/release/dimitribellini/eprobe-cli?style=for-the-badge&logo=github&label=Release&color=blue" alt="Release" /></a>
+  <a href="https://github.com/eprobe-dev/eprobe/releases/latest"><img src="https://img.shields.io/github/v/release/eprobe-dev/eprobe?style=for-the-badge&logo=github&label=Release&color=blue" alt="Release" /></a>
   <img src="https://img.shields.io/badge/Linux-Kernel%205.8--7.0%2B%20CO--RE-orange?style=for-the-badge&logo=linux&logoColor=white" alt="Kernel" />
   <img src="https://img.shields.io/badge/Binary-%3C25MB%20Static-purple?style=for-the-badge" alt="Binary Size" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=for-the-badge" alt="License" /></a>
 </p>
 
 <p align="center">
@@ -16,7 +16,8 @@
 
 <p align="center">
   <a href="https://eprobe.io/"><b>🌐 Official Website: eprobe.io</b></a> &nbsp;•&nbsp;
-  <a href="https://github.com/dimitribellini/eprobe-cli/releases"><b>📦 GitHub Releases</b></a> &nbsp;•&nbsp;
+  <a href="https://github.com/eprobe-dev/eprobe/releases"><b>📦 GitHub Releases</b></a> &nbsp;•&nbsp;
+  <a href="https://github.com/eprobe-dev/eprobe-modules"><b>🧩 eBPF Probe Sources (Dual MIT/GPL)</b></a> &nbsp;•&nbsp;
   <a href="#-quick-start"><b>⚡ Quick Start</b></a> &nbsp;•&nbsp;
   <a href="#-tactical-incident-recipes"><b>🚨 Incident Recipes</b></a> &nbsp;•&nbsp;
   <a href="#-tui-navigation--shortcuts"><b>⌨️ Keybindings</b></a> &nbsp;•&nbsp;
@@ -46,7 +47,7 @@ Choose your preferred installation method:
 curl -sSL https://get.eprobe.io | sh
 
 # ⚡ Method B: Direct Binary Download (GitHub Releases)
-curl -sSL https://github.com/dimitribellini/eprobe-cli/releases/latest/download/eprobe-linux-amd64 -o eprobe
+curl -sSL https://github.com/eprobe-dev/eprobe/releases/latest/download/eprobe-linux-amd64 -o eprobe
 chmod +x eprobe
 sudo mv eprobe /usr/local/bin/
 
@@ -56,12 +57,12 @@ eprobe version
 
 > **Fast 1-Liner (Local execution without PATH install)**:
 > ```bash
-> curl -sSL https://github.com/dimitribellini/eprobe-cli/releases/latest/download/eprobe-linux-amd64 -o eprobe && chmod +x eprobe
+> curl -sSL https://github.com/eprobe-dev/eprobe/releases/latest/download/eprobe-linux-amd64 -o eprobe && chmod +x eprobe
 > sudo ./eprobe run app/docker-monitor
 > ```
 > 
 > *Need a pinned version? Use the tagged release syntax:*
-> `curl -sSL https://github.com/dimitribellini/eprobe-cli/releases/download/v0.0.88/eprobe-v0.0.88-linux-amd64 -o eprobe`
+> `curl -sSL https://github.com/eprobe-dev/eprobe/releases/download/v0.0.89/eprobe-v0.0.89-linux-amd64 -o eprobe`
 
 ### 2. Triage Your First Incident (Instant Run)
 
@@ -72,7 +73,10 @@ sudo eprobe run app/docker-monitor
 ```
 
 > [!NOTE]
-> `eprobe` automatically downloads and verifies cryptographically signed eBPF bytecode packages on demand from the registry (`https://api.eprobe.io`) and caches them locally. No compiler toolchain (`clang`, `llvm`) or kernel headers are required on the target machine.
+> `eprobe` automatically downloads and verifies Ed25519-signed eBPF bytecode packages on demand from the registry (`https://api.eprobe.io`). Want to audit and run self-compiled probe bytecode completely offline without touching `api.eprobe.io`? Compile from [`eprobe-dev/eprobe-modules`](https://github.com/eprobe-dev/eprobe-modules) via `make build-unsigned` and run:
+> ```bash
+> sudo eprobe run --module-file ./dist/perf-stall-tracer.epm
+> ```
 
 ---
 
@@ -103,6 +107,16 @@ sudo eprobe run perf/stall-tracer --pid 4092
 
 # Filter exclusively for D-state (uninterruptible disk/storage sleep)
 sudo eprobe run perf/stall-tracer --stall-type 1
+```
+
+### 🔍 Production-Safe Syscall Failure & Latency X-Ray (`sys/syscall-xray`)
+Replace `strace -p <PID>` and `strace -c -T` in production without ptrace pauses:
+```bash
+# Capture ENOENT/EACCES/ECONNREFUSED failures & >10ms syscalls for a PID
+sudo eprobe run sys/syscall-xray --pid 4092
+
+# Stream exclusively failed syscalls as NDJSON
+sudo eprobe run sys/syscall-xray --pid 4092 --errors-only -output json
 ```
 
 ### 🐳 Container Crashes & CPU CFS Throttling (`app/docker-monitor`)
@@ -207,11 +221,11 @@ Modules are organized into focused operational domains in the Remote Registry:
 | Domain | Module | Description | Fast Command |
 | :--- | :--- | :--- | :--- |
 | **`perf/`** | `perf/stall-tracer` | Off-CPU stalls, D-state storage sleep, scheduler preemption & futex contention | `sudo eprobe run perf/stall-tracer` |
+| **`sys/`** | `sys/syscall-xray` | Production-safe `strace` alternative: `ENOENT`/`ECONNREFUSED`, paths & `syscall_stats` | `sudo eprobe run sys/syscall-xray --pid <PID>` |
 | **`app/`** | `app/docker-monitor` | Container resource consumption, CPU throttling, OOMs & block I/O stream | `sudo eprobe run app/docker-monitor` |
 | **`app/`** | `app/universal-tls-sniffer` | Plaintext HTTPS/HTTP2 inspection via OpenSSL uprobes with auto-sanitization | `sudo eprobe run app/universal-tls-sniffer` |
 | **`app/`** | `app/http-tracer` | HTTP status codes, microsecond TTFB, W3C distributed trace trees & 5xx cascades | `sudo eprobe run app/http-tracer` |
 | **`app/`** | `app/mysql-monitor` | Query execution latency, slow query leaderboards & table-level locks | `sudo eprobe run app/mysql-monitor` |
-| **`app/`** | `app/zabbix-monitor` | Zabbix server internal queue delays, poller sync & database bottlenecks | `sudo eprobe run app/zabbix-monitor` |
 | **`sec/`** | `sec/exec-audit` | Process execution forensics, 256-byte args, parent-child lineages & login UIDs | `sudo eprobe run sec/exec-audit` |
 | **`log/`** | `log/stderr-capture` | Kernel-level capture of stderr writes (`fd == 2`) and unhandled crashes | `sudo eprobe run log/stderr-capture` |
 
@@ -239,6 +253,7 @@ eprobe version                   # Display CLI version
 | Flag | Description | Default |
 | :--- | :--- | :--- |
 | `-output <format>` | Output mode: `tui` (interactive), `text`, `json`, `ndjson`, or `stream` | `tui` |
+| `--module-file <path>` | Load a local `.epm` archive or unpacked module directory offline (skips registry) | (none) |
 | `--pid <PID>` | Filter events by process PID | `0` (all) |
 | `-port <port>` | Filter events by TCP/UDP port number | `0` (all) |
 | `--comm <name>` | Filter events by process command name | (none) |
@@ -337,14 +352,17 @@ tui_hints:
 ### Build Commands
 ```bash
 # Clone the repository
-git clone https://github.com/dimitribellini/eprobe-cli.git
-cd eprobe-cli
+git clone https://github.com/eprobe-dev/eprobe.git
+cd eprobe
 
 # Run unit tests
 go test -v ./...
 
 # Compile standalone static binary
 make build
+
+# Verify self-compiled unsigned probes offline (from github.com/eprobe-dev/eprobe-modules)
+sudo ./eprobe run --module-file ../eprobe-modules/dist/perf-stall-tracer.epm
 ```
 </details>
 
@@ -354,10 +372,11 @@ make build
 
 - **Zero Host Mutation**: Probes attach in read-only mode via kernel tracepoints, kprobes, and uprobes.
 - **Instant Clean Detach**: Pressing `Ctrl+C` or `q` traps `SIGINT`/`SIGTERM` to safely detach all probes from the kernel and purge allocated BPF ring buffers and hash maps, leaving zero residual background daemons.
-- **Cryptographic Trust**: Every module manifest and bytecode bundle is verified via Ed25519 signatures before execution.
+- **Cryptographic Trust**: Every remote module manifest and bytecode bundle is verified via Ed25519 signatures before execution (overrideable for self-hosted/BYOC registries via `EPROBE_PUBLIC_KEY`).
 - **Default Credential Masking**: Authorization headers, Bearer tokens, and API keys are automatically sanitized (`**********`) during live inspection and streaming.
 
 ---
 
 ## 📄 License
-Copyright (c) 2026 **eprobe team**. This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Copyright (c) 2026 **eprobe contributors**. The CLI, TUI, and CO-RE loader are licensed under the **Apache License 2.0** — see [LICENSE](LICENSE).
+All open-source eBPF kernel probe `.c` sources in [`eprobe-dev/eprobe-modules`](https://github.com/eprobe-dev/eprobe-modules) are dual-licensed under **`GPL-2.0-only OR MIT`** (`SEC("license") = "Dual MIT/GPL"`).

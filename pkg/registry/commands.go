@@ -362,3 +362,81 @@ func ShowModuleHelp(name string) error {
 	return nil
 }
 
+// PrepareLocalModule loads and verifies a local .epm archive or unpacked module directory.
+// Signed packages verify Ed25519 signature + SHA256; unsigned developer builds without manifest.sig
+// verify SHA256 and print a notice to stderr.
+func PrepareLocalModule(moduleFilePath string, pubKey ed25519.PublicKey) (string, *Manifest, func(), error) {
+	noop := func() {}
+	info, err := os.Stat(moduleFilePath)
+	if err != nil {
+		return "", nil, noop, fmt.Errorf("failed to access module path %q: %w", moduleFilePath, err)
+	}
+
+	targetDir := moduleFilePath
+	cleanup := noop
+	if !info.IsDir() {
+		pkgBytes, err := os.ReadFile(moduleFilePath)
+		if err != nil {
+			return "", nil, noop, fmt.Errorf("failed to read local module archive %q: %w", moduleFilePath, err)
+		}
+		tmpDir, err := os.MkdirTemp("", "eprobe-local-mod-*")
+		if err != nil {
+			return "", nil, noop, fmt.Errorf("failed to create temporary directory for module extraction: %w", err)
+		}
+		cleanup = func() { _ = os.RemoveAll(tmpDir) }
+		if err := UnpackPackage(pkgBytes, tmpDir); err != nil {
+			cleanup()
+			return "", nil, noop, fmt.Errorf("failed to extract local module %q: %w", moduleFilePath, err)
+		}
+		targetDir = tmpDir
+	}
+
+	manifestBytes, err := os.ReadFile(filepath.Join(targetDir, "manifest.yaml"))
+	if err != nil {
+		cleanup()
+		return "", nil, noop, fmt.Errorf("missing manifest.yaml in local module %q: %w", moduleFilePath, err)
+	}
+	programBytes, err := os.ReadFile(filepath.Join(targetDir, "program.o"))
+	if err != nil {
+		cleanup()
+		return "", nil, noop, fmt.Errorf("missing program.o in local module %q: %w", moduleFilePath, err)
+	}
+
+	manifest, err := ParseManifest(manifestBytes)
+	if err != nil {
+		cleanup()
+		return "", nil, noop, fmt.Errorf("failed to parse manifest.yaml in %q: %w", moduleFilePath, err)
+	}
+
+	sigBytes, sigErr := os.ReadFile(filepath.Join(targetDir, "manifest.sig"))
+	if sigErr == nil {
+		if err := security.VerifyManifest(manifestBytes, sigBytes, pubKey); err != nil {
+			cleanup()
+			return "", nil, noop, fmt.Errorf("local module signature verification failed: %w", err)
+		}
+		if strings.TrimSpace(manifest.SHA256) == "" {
+			cleanup()
+			return "", nil, noop, fmt.Errorf("local module manifest missing sha256 checksum")
+		}
+		if err := security.VerifyProgramHash(programBytes, manifest.SHA256); err != nil {
+			cleanup()
+			return "", nil, noop, fmt.Errorf("local module integrity check failed: %w", err)
+		}
+	} else if os.IsNotExist(sigErr) {
+		if strings.TrimSpace(manifest.SHA256) == "" {
+			cleanup()
+			return "", nil, noop, fmt.Errorf("unsigned local module missing sha256 in manifest.yaml")
+		}
+		if err := security.VerifyProgramHash(programBytes, manifest.SHA256); err != nil {
+			cleanup()
+			return "", nil, noop, fmt.Errorf("local module integrity check failed: %w", err)
+		}
+		fmt.Fprintln(os.Stderr, "Notice: running unsigned local module; SHA256 verified")
+	} else {
+		cleanup()
+		return "", nil, noop, fmt.Errorf("failed to read manifest.sig: %w", sigErr)
+	}
+
+	return targetDir, manifest, cleanup, nil
+}
+

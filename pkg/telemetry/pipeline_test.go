@@ -177,8 +177,10 @@ func TestMatchesFilters(t *testing.T) {
 
 func TestSanitizeEvent(t *testing.T) {
 	event := map[string]interface{}{
-		"req_payload":  "POST /v1/chat HTTP/1.1\r\nAuthorization: Bearer sk-1234567890abcdef\r\n\r\n{\"key\":\"sk_live_987654321\"}",
+		"req_payload":  "POST /v1/chat HTTP/1.1\r\nAuthorization: Bearer sk-1234567890abcdef\r\napi-key: secret123\r\n\r\n{\"key\":\"sk_live_987654321\"}",
 		"resp_payload": "HTTP/1.1 200 OK\r\n\r\n{\"result\":\"ok\"}",
+		"query":        "apikey=secret456 token=key-abcdef987654",
+		"message":      "GET /api/v1/orders/checkout HTTP/1.1",
 	}
 
 	SanitizeEvent(event)
@@ -190,8 +192,53 @@ func TestSanitizeEvent(t *testing.T) {
 	if !strings.Contains(reqPayload, "Bearer **********") {
 		t.Errorf("expected Bearer ********** in masked payload, got %s", reqPayload)
 	}
+	if strings.Contains(reqPayload, "secret123") {
+		t.Errorf("expected api-key secret to be masked, got %s", reqPayload)
+	}
 	if strings.Contains(reqPayload, "sk_live_987654321") {
 		t.Errorf("expected sk_live key to be masked, got %s", reqPayload)
 	}
+
+	query := event["query"].(string)
+	if strings.Contains(query, "secret456") {
+		t.Errorf("expected apikey secret to be masked, got %s", query)
+	}
+	if strings.Contains(query, "abcdef987654") {
+		t.Errorf("expected key- token to be masked, got %s", query)
+	}
+
+	if got := event["message"].(string); got != "GET /api/v1/orders/checkout HTTP/1.1" {
+		t.Errorf("expected normal HTTP path to remain untouched, got %s", got)
+	}
+}
+
+func BenchmarkSanitizeEvent(b *testing.B) {
+	b.Run("NormalTrafficFastPath", func(b *testing.B) {
+		event := map[string]interface{}{
+			"req_payload":  "GET /api/v1/orders?limit=20&offset=0 HTTP/1.1\r\nHost: checkout.internal\r\nUser-Agent: Go-http-client/2.0\r\n\r\n",
+			"resp_payload": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\",\"count\":20}",
+			"query":        "SELECT id, user_id, total_cents, created_at FROM orders WHERE status = 'paid' ORDER BY created_at DESC LIMIT 20",
+			"message":      "request completed cleanly in 1420 microseconds",
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			SanitizeEvent(event)
+		}
+	})
+
+	b.Run("SensitivePayloadRegexPath", func(b *testing.B) {
+		event := map[string]interface{}{
+			"req_payload":  "",
+			"resp_payload": "HTTP/1.1 200 OK\r\n\r\n{\"result\":\"ok\"}",
+		}
+		const rawReq = "POST /v1/charges HTTP/1.1\r\nAuthorization: Bearer sk-1234567890abcdef\r\n\r\n{\"api_key\":\"sk_live_987654321\"}"
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			event["req_payload"] = rawReq
+			SanitizeEvent(event)
+		}
+	})
 }
 

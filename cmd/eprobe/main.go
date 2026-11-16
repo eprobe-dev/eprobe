@@ -33,6 +33,7 @@ Commands:
 
 Global Flags:
   -output, --output             Output format: 'tui' (default), 'text', 'json', 'ndjson', or 'stream'
+  -module-file, --module-file   Run a local .epm package or unpacked directory offline (skips registry)
   -port, --port                 Port filter for network trace (default: 0, matches all ports)
   -pid, --pid                   Filter events by process PID (default: 0, matches all processes)
   -slow-us, --slow-us           Slow request/query threshold in microseconds (e.g. 50000)
@@ -45,6 +46,7 @@ Global Flags:
 
 Environment Variables:
   REGISTRY_URL                  Override default registry API base URL (default: https://api.eprobe.io)
+  EPROBE_PUBLIC_KEY             Override default 32-byte hex Ed25519 verification public key
   EPROBE_STREAM_TOKEN           Default stream token UUID for SaaS portal export
   EPROBE_STREAM_URL             Override default stream portal URL (default: https://stream.eprobe.io)
 
@@ -85,6 +87,7 @@ Requirements:
 type ParsedOptions struct {
 	Cmd             string
 	Module          string
+	ModuleFile      string
 	OutputFormat    string
 	FilterPort      uint16
 	FilterPID       uint32
@@ -97,6 +100,7 @@ type ParsedOptions struct {
 	RegistryURL     string
 	StreamToken     string
 	StreamURL       string
+	DynamicVars     map[string]string
 }
 
 func parseArgs() (opts ParsedOptions, err error) {
@@ -105,6 +109,7 @@ func parseArgs() (opts ParsedOptions, err error) {
 	opts.FilterPID = 0
 	opts.SlowThresholdUS = 0
 	opts.Sanitize = true // Enabled by default to protect secrets/Bearer tokens
+	opts.DynamicVars = make(map[string]string)
 	opts.RegistryURL = "https://api.eprobe.io"
 	if envReg := os.Getenv("REGISTRY_URL"); envReg != "" {
 		opts.RegistryURL = envReg
@@ -232,6 +237,12 @@ func parseArgs() (opts ParsedOptions, err error) {
 			}
 			opts.StreamURL = os.Args[i+1]
 			i++ // skip value
+		case "-module-file", "--module-file":
+			if i+1 >= len(os.Args) {
+				return opts, fmt.Errorf("missing value for flag %s", arg)
+			}
+			opts.ModuleFile = os.Args[i+1]
+			i++ // skip value
 		default:
 			// Check if it's a key-value style flag like -output=json
 			if (len(arg) > 8 && arg[:8] == "-output=") || (len(arg) > 9 && arg[:9] == "--output=") {
@@ -283,6 +294,9 @@ func parseArgs() (opts ParsedOptions, err error) {
 			} else if (len(arg) > 12 && arg[:12] == "-stream-url=") || (len(arg) > 13 && arg[:13] == "--stream-url=") {
 				parts := strings.SplitN(arg, "=", 2)
 				opts.StreamURL = parts[1]
+			} else if (len(arg) > 13 && arg[:13] == "-module-file=") || (len(arg) > 14 && arg[:14] == "--module-file=") {
+				parts := strings.SplitN(arg, "=", 2)
+				opts.ModuleFile = parts[1]
 			} else if arg == "run" || arg == "pull" || arg == "describe" || arg == "remove" || arg == "delete" || arg == "rm" || arg == "update" {
 				opts.Cmd = arg
 				if arg == "remove" || arg == "delete" || arg == "rm" {
@@ -302,11 +316,29 @@ func parseArgs() (opts ParsedOptions, err error) {
 				opts.Cmd = "help"
 				return opts, nil
 			} else {
-				// Unknown argument starting with -
+				// Collect dynamic module flags (--<key> <val> / --<key>=<val> / -<key> <val>)
 				if len(arg) > 0 && arg[0] == '-' {
-					return opts, fmt.Errorf("unknown flag: %s", arg)
+					keyPart := strings.TrimLeft(arg, "-")
+					if keyPart == "" {
+						return opts, fmt.Errorf("unknown flag: %s", arg)
+					}
+					if strings.Contains(keyPart, "=") {
+						parts := strings.SplitN(keyPart, "=", 2)
+						opts.DynamicVars[parts[0]] = parts[1]
+					} else if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") && !(opts.Module == "" && opts.ModuleFile == "" && registry.ValidateModuleName(os.Args[i+1]) == nil) {
+						opts.DynamicVars[keyPart] = os.Args[i+1]
+						i++
+					} else {
+						opts.DynamicVars[keyPart] = "true"
+					}
 				}
 			}
+		}
+	}
+
+	if opts.Cmd != "run" && len(opts.DynamicVars) > 0 {
+		for k := range opts.DynamicVars {
+			return opts, fmt.Errorf("unknown flag: --%s", k)
 		}
 	}
 
@@ -425,15 +457,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	if opts.Module == "" {
-		fmt.Println("Error: missing module name. Usage: eprobe run <module>")
+	if opts.Module == "" && opts.ModuleFile == "" {
+		fmt.Println("Error: missing module name. Usage: eprobe run <module> or eprobe run --module-file <path.epm>")
 		os.Exit(1)
 	}
 
-	// Validate module name before any further operations
-	if valErr := registry.ValidateModuleName(opts.Module); valErr != nil {
-		fmt.Printf("Error: %v\n", valErr)
-		os.Exit(1)
+	var localModDir string
+	var localCleanup func()
+	if opts.ModuleFile != "" {
+		pubKey := security.GetDefaultPublicKey()
+		var localManifest *registry.Manifest
+		localModDir, localManifest, localCleanup, err = registry.PrepareLocalModule(opts.ModuleFile, pubKey)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+		defer localCleanup()
+		if opts.Module == "" {
+			opts.Module = localManifest.Name
+		}
+		if err := runtime.ValidateDynamicFlags(localManifest, opts.DynamicVars); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// Validate module name before any further operations
+		if valErr := registry.ValidateModuleName(opts.Module); valErr != nil {
+			fmt.Printf("Error: %v\n", valErr)
+			os.Exit(1)
+		}
 	}
 
 	// Root check BEFORE auto-pull to avoid downloading as non-root into wrong cache dir
@@ -442,14 +494,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Dynamic auto-pull logic if not locally cached
-	if !registry.IsModuleCached(opts.Module) {
-		fmt.Printf("Module %q is not cached locally. Pulling from registry...\n", opts.Module)
-		pubKey := security.GetDefaultPublicKey()
-		err = registry.PullModule(context.Background(), opts.Module, opts.RegistryURL, pubKey)
-		if err != nil {
-			fmt.Printf("Error: failed to pull module: %v\n", err)
-			os.Exit(1)
+	if opts.ModuleFile == "" {
+		// Dynamic auto-pull logic if not locally cached
+		if !registry.IsModuleCached(opts.Module) {
+			fmt.Printf("Module %q is not cached locally. Pulling from registry...\n", opts.Module)
+			pubKey := security.GetDefaultPublicKey()
+			err = registry.PullModule(context.Background(), opts.Module, opts.RegistryURL, pubKey)
+			if err != nil {
+				fmt.Printf("Error: failed to pull module: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -470,14 +524,21 @@ func main() {
 		cancel()
 	}()
 
-	// Load eBPF module dynamically from the local cache folder
-	lm, err := runtime.LoadModule(opts.Module, runtime.ModuleOptions{
+	modOpts := runtime.ModuleOptions{
 		FilterPort:      opts.FilterPort,
 		FilterPID:       opts.FilterPID,
 		SlowThresholdUS: opts.SlowThresholdUS,
 		CustomLibSSL:    opts.CustomLibSSL,
 		FilterErrors:    opts.FilterErrors,
-	})
+		DynamicVars:     opts.DynamicVars,
+	}
+
+	var lm *runtime.LoadedModule
+	if localModDir != "" {
+		lm, err = runtime.LoadModuleFromDir(localModDir, modOpts)
+	} else {
+		lm, err = runtime.LoadModule(opts.Module, modOpts)
+	}
 	if err != nil {
 		fmt.Printf("Failed to load module: %v\n", err)
 		os.Exit(1)

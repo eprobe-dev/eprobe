@@ -166,17 +166,72 @@ func MatchesFilters(e map[string]interface{}, schema []registry.FieldSchema, cfg
 }
 
 var (
-	bearerRegex = regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9_\-\.]+`)
-	apiKeyRegex = regexp.MustCompile(`(?i)(sk_live_|key-|api[_-]?key[=:\s]+)[A-Za-z0-9_\-]+`)
+	bearerRegex           = regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9_\-\.]+`)
+	apiKeyRegex           = regexp.MustCompile(`(?i)(sk_live_|key-|api[_-]?key[=:\s]+)[A-Za-z0-9_\-]+`)
+	sanitizePayloadFields = []string{"req_payload", "resp_payload", "query", "message", "payload"}
 )
+
+// containsASCIIFold reports whether s contains needleLower using zero-allocation ASCII case folding.
+func containsASCIIFold(s, needleLower string) bool {
+	nLen := len(needleLower)
+	if nLen == 0 {
+		return true
+	}
+	if len(s) < nLen {
+		return false
+	}
+	limit := len(s) - nLen
+	first := needleLower[0]
+	for i := 0; i <= limit; i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != first {
+			continue
+		}
+		match := true
+		for j := 1; j < nLen; j++ {
+			cj := s[i+j]
+			if cj >= 'A' && cj <= 'Z' {
+				cj += 'a' - 'A'
+			}
+			if cj != needleLower[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
 
 // SanitizeEvent masks sensitive tokens (Bearer tokens, API keys) in payload fields.
 func SanitizeEvent(e map[string]interface{}) {
-	payloadFields := []string{"req_payload", "resp_payload", "query", "message", "payload"}
-	for _, k := range payloadFields {
-		if raw, ok := e[k].(string); ok && raw != "" {
-			cleaned := bearerRegex.ReplaceAllString(raw, "${1}**********")
+	for _, k := range sanitizePayloadFields {
+		raw, ok := e[k].(string)
+		if !ok || raw == "" {
+			continue
+		}
+		hasBearer := containsASCIIFold(raw, "bearer")
+		hasAPIKey := containsASCIIFold(raw, "sk_live_") ||
+			containsASCIIFold(raw, "key-") ||
+			containsASCIIFold(raw, "api_key") ||
+			containsASCIIFold(raw, "api-key") ||
+			containsASCIIFold(raw, "apikey")
+		if !hasBearer && !hasAPIKey {
+			continue
+		}
+		cleaned := raw
+		if hasBearer {
+			cleaned = bearerRegex.ReplaceAllString(cleaned, "${1}**********")
+		}
+		if hasAPIKey {
 			cleaned = apiKeyRegex.ReplaceAllString(cleaned, "${1}**********")
+		}
+		if cleaned != raw {
 			e[k] = cleaned
 		}
 	}
