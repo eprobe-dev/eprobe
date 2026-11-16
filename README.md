@@ -1,7 +1,6 @@
-# eprobe: Open-Source On-Demand Linux Incident & Security Diagnostic Tool
+# eprobe: Open-Source On-Demand Linux Incident & Kernel Diagnostic Tool
 
 <p align="center">
-  <a href="https://eprobe.io/"><img src="https://img.shields.io/badge/Website-eprobe.io-00D26A?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website" /></a>
   <a href="https://github.com/eprobe-dev/eprobe/releases/latest"><img src="https://img.shields.io/github/v/release/eprobe-dev/eprobe?style=for-the-badge&logo=github&label=Release&color=blue" alt="Release" /></a>
   <img src="https://img.shields.io/badge/Linux-Kernel%205.8--7.0%2B%20CO--RE-orange?style=for-the-badge&logo=linux&logoColor=white" alt="Kernel" />
   <img src="https://img.shields.io/badge/Binary-%3C25MB%20Static-purple?style=for-the-badge" alt="Binary Size" />
@@ -15,7 +14,6 @@
 </p>
 
 <p align="center">
-  <a href="https://eprobe.io/"><b>🌐 Official Website: eprobe.io</b></a> &nbsp;•&nbsp;
   <a href="https://github.com/eprobe-dev/eprobe/releases"><b>📦 GitHub Releases</b></a> &nbsp;•&nbsp;
   <a href="https://github.com/eprobe-dev/eprobe-modules"><b>🧩 eBPF Probe Sources (Dual MIT/GPL)</b></a> &nbsp;•&nbsp;
   <a href="#-quick-start"><b>⚡ Quick Start</b></a> &nbsp;•&nbsp;
@@ -182,7 +180,7 @@ When running in interactive TUI mode (`eprobe run <module>`), navigate smoothly 
 
 ## ☁️ Live Web Collaboration & SaaS Streaming
 
-Need to triage collaboratively with your distributed incident response team? Stream live telemetry to the browser-based Web Inspector at [eprobe.io](https://eprobe.io):
+Need to triage collaboratively with your distributed incident response team? Stream live telemetry to the browser-based Web Inspector at `eprobe.io` *(Web Console currently in private beta)*:
 
 ```bash
 # Extract live kernel telemetry to collaborative Web Diagnostic View
