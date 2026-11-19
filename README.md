@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://github.com/eprobe-dev/eprobe/releases"><b>📦 GitHub Releases</b></a> &nbsp;•&nbsp;
   <a href="https://github.com/eprobe-dev/eprobe-modules"><b>🧩 eBPF Probe Sources (Dual MIT/GPL)</b></a> &nbsp;•&nbsp;
+  <a href="#-live-demo-the-3-am-ghost-latency-checkout-outage"><b>🎬 Live Demo</b></a> &nbsp;•&nbsp;
   <a href="#-quick-start"><b>⚡ Quick Start</b></a> &nbsp;•&nbsp;
   <a href="#-tactical-incident-recipes"><b>🚨 Incident Recipes</b></a> &nbsp;•&nbsp;
   <a href="#-tui-navigation--shortcuts"><b>⌨️ Keybindings</b></a> &nbsp;•&nbsp;
@@ -24,13 +25,11 @@
 
 ---
 
-| **Mutex & Futex Lock Contention (`perf/stall-tracer`)** | **Zero-Cert Plaintext HTTPS Inspection (`app/universal-tls-sniffer`)** |
-| :---: | :---: |
-| <img src="img/perf-stall-tracer.jpg" alt="eprobe perf/stall-tracer Mutex and Futex Lock Contention TUI" width="100%" /> | <img src="img/universal-tls-sniffer.jpg" alt="eprobe app/universal-tls-sniffer Live Decrypted TLS Traffic TUI" width="100%" /> |
+## 🎬 Live Demo: The 3 AM Ghost Latency Checkout Outage
 
-<p align="center">
-  <em>Interactive multi-page Bubbletea TUI running live on Linux 7.0: isolating microsecond futex lock contention victims &amp; latency histograms (left) and OpenSSL uprobe-decrypted HTTPS API endpoints &amp; traffic streams without TLS proxy certificates (right).</em>
-</p>
+> **Scenario:** CPU is 4%, app logs say `200 OK`, and checkout p99 just spiked to 480ms. Watch `strace` crush live throughput vs. `eprobe` isolating both kernel bugs in 15 seconds with zero RPS drop.
+
+https://github.com/user-attachments/assets/27d4558a-a7f1-4c06-adf9-fbc0d1e96b3f
 
 ---
 
@@ -87,6 +86,16 @@ When standard monitoring platforms (Datadog, Grafana) alert that a server is fai
 | ⚡ **On-Demand & Zero Agents Left Behind** | Single statically compiled open-source binary (&lt;25MB). Loads read-only eBPF **Diagnostic Modules** on demand with **&lt;1% CPU overhead** and **zero 24/7 background daemons**. Clean detach with `Ctrl+C` or `q` unloads probes instantly. |
 | 🖥️ **Single Pane of Glass (Local TUI or Web UI)** | Correlates CPU & thread locks, system security & audit, disk I/O, network/TLS traffic, and Docker/MySQL apps in real time—viewable locally in the `eprobe` Text Console or online in the `eprobe.io` Web Console. |
 | 🤖 **Anonymized AI Bundle (IPs & Secrets Masked)** | One-click `.zip` export (`00_PROMPT_COPY_PASTE.md` + `01_EXECUTIVE_SUMMARY.md`) with automatic IP, token, and password masking—ready for **Claude, ChatGPT, Gemini & Ollama** with **zero data leaks**. |
+
+### 📸 Interactive Terminal Console in Action
+
+| **Mutex & Futex Lock Contention (`perf/stall-tracer`)** | **Zero-Cert Plaintext HTTPS Inspection (`app/universal-tls-sniffer`)** |
+| :---: | :---: |
+| <img src="img/perf-stall-tracer.jpg" alt="eprobe perf/stall-tracer Mutex and Futex Lock Contention TUI" width="100%" /> | <img src="img/universal-tls-sniffer.jpg" alt="eprobe app/universal-tls-sniffer Live Decrypted TLS Traffic TUI" width="100%" /> |
+
+<p align="center">
+  <em>Interactive multi-page Bubbletea TUI running live on Linux 7.0: isolating microsecond futex lock contention victims &amp; latency histograms (left) and OpenSSL uprobe-decrypted HTTPS API endpoints &amp; traffic streams without TLS proxy certificates (right).</em>
+</p>
 
 ---
 
