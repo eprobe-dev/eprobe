@@ -116,14 +116,15 @@ type StateSample struct {
 }
 
 type PaneModel struct {
-	Def           registry.TUIPane
-	Buffer        *EventBuffer
-	Aggregator    *Aggregator
-	Table         table.Model
-	ActiveCols    []registry.ColumnHint
-	FormattedRows []table.Row
-	NeedsRebuild  bool
-	TableDirty    bool
+	Def             registry.TUIPane
+	Buffer          *EventBuffer
+	Aggregator      *Aggregator
+	Table           table.Model
+	ActiveCols      []registry.ColumnHint
+	FormattedRows   []table.Row
+	DisplayedEvents []map[string]interface{}
+	NeedsRebuild    bool
+	TableDirty      bool
 	Viewport      viewport.Model
 	EventChan     chan map[string]interface{}
 	IsInspectMode bool
@@ -299,6 +300,7 @@ func (m *Model) syncStreamPaneTable(pane *PaneModel) {
 		}
 		allEvents := pane.Buffer.GetAll()
 		rows := make([]table.Row, 0, len(allEvents))
+		displayed := make([]map[string]interface{}, 0, len(allEvents))
 		filter := strings.ToLower(pane.FilterQuery)
 		searchFields := pane.Def.SearchableFields
 		for _, e := range allEvents {
@@ -306,8 +308,10 @@ func (m *Model) syncStreamPaneTable(pane *PaneModel) {
 				continue
 			}
 			rows = append(rows, m.formatStreamRow(e, columns))
+			displayed = append(displayed, e)
 		}
 		pane.FormattedRows = rows
+		pane.DisplayedEvents = displayed
 		pane.NeedsRebuild = false
 		pane.TableDirty = true
 	}
@@ -626,15 +630,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if activePane.Def.InspectPayload != "" {
 				if activePane.Def.Type == "stream" {
+					m.syncStreamPaneTable(activePane)
 					rowIdx := activePane.Table.Cursor()
-					if rowIdx >= 0 && rowIdx < activePane.Buffer.Len() {
-						allEvents := activePane.Buffer.GetAll()
-						if rowIdx < len(allEvents) {
-							event := allEvents[rowIdx]
-							content := formatEventInspectContent(event, activePane.Def)
-							wrappedContent := lipgloss.NewStyle().Width(m.width - 4).Render(content)
-							activePane.Viewport.SetContent(wrappedContent)
-						}
+					if rowIdx >= 0 && rowIdx < len(activePane.DisplayedEvents) {
+						event := activePane.DisplayedEvents[rowIdx]
+						activePane.InspectEvent = event
+						content := formatEventInspectContent(event, activePane.Def)
+						wrappedContent := lipgloss.NewStyle().Width(m.width - 4).Render(content)
+						activePane.Viewport.SetContent(wrappedContent)
+						activePane.Viewport.GotoTop()
+					} else {
+						activePane.InspectEvent = nil
+						activePane.Viewport.SetContent("No matching events to inspect.")
+						activePane.Viewport.GotoTop()
 					}
 				} else if activePane.Def.Type == "top" {
 					row := activePane.Table.SelectedRow()
@@ -748,8 +756,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if pane.Def.Type == "stream" && !pane.NeedsRebuild {
 				if m.eventMatchesFilter(e, filter, searchFields) {
 					pane.FormattedRows = append(pane.FormattedRows, m.formatStreamRow(e, columns))
-					if filter == "" && len(pane.FormattedRows) > 10000 {
+					pane.DisplayedEvents = append(pane.DisplayedEvents, e)
+					if len(pane.FormattedRows) > 10000 {
 						pane.FormattedRows = pane.FormattedRows[len(pane.FormattedRows)-10000:]
+						pane.DisplayedEvents = pane.DisplayedEvents[len(pane.DisplayedEvents)-10000:]
 					}
 					pane.TableDirty = true
 				}
